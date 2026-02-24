@@ -3,7 +3,7 @@ from pyspark.sql import SparkSession
 # Crear sesión Spark
 spark = SparkSession.builder \
     .appName("CSV_to_MongoDB_Gold") \
-    .config("spark.mongodb.connection.uri", "mongodb://192.168.0.11:27017") \
+    .config("spark.mongodb.connection.uri", "mongodb://172.27.192.1:27017") \
     .config("spark.mongodb.database", "medallon") \
     .config("spark.mongodb.collection", "gold") \
     .getOrCreate()
@@ -27,7 +27,7 @@ print("===========================")
 df.write \
   .format("mongodb") \
   .mode("overwrite") \
-  .option("spark.mongodb.connection.uri", "mongodb://192.168.0.11:27017") \
+  .option("spark.mongodb.connection.uri", "mongodb://172.27.192.1:27017") \
   .option("spark.mongodb.database", "medallon") \
   .option("spark.mongodb.collection", "gold") \
   .save()

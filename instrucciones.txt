@@ -1,0 +1,174 @@
+ ===================Crear la carpeta del proyecto ================
+mkdir -p spark-elt-medallon
+cd spark-elt-medallon
+Dentro de la carpeta crear directorios
+mkdir -p dataset
+mkdir -p procesos
+mkdir -p schema
+Abrir en otra instancia de VS Code la carpeta del proyecto
+code ~/spark-elt-medallon
+Cargar los archivos .data en la carpeta dataset
+Cargar los archivos .py en la carpeta procesos
+Cargar los archivos .avsc en la carpeta schema
+
+=================Iniciar servicios HDFS, YARN, Hive_Metastore, HiveServer============
+start-dfs.sh
+start-yarn.sh
+hive --service metastore &
+sleep 10
+hive --service hiveserver2 &
+
+Verificar:
+
+jps 
+3344 RunJar
+3537 RunJar
+2693 ResourceManager
+1942 NameNode
+2105 DataNode
+4092 Jps
+2862 NodeManager
+2399 SecondaryNameNode
+
+VERIFICAR EN DBEAVER NO EXISTEN LAS BASE DE DATOS (SIN LAS CAPAS TOPICOSB_WORKLOAD, LANDING, CURATED, FUNCTIONAL)
+Verificar en el monitor YARN (LOCALHOST:8088) que no haya procesos en ejecución
+
+
+=============Crear directorio HDFS y carga dataset===============
+hdfs dfs -mkdir -p /user/hadoop/dataset
+hdfs dfs -put /home/hadoop/spark-elt-medallon/dataset/* /user/hadoop/dataset/
+hdfs dfs -ls /user/hadoop/dataset # Verificar carga
+
+
+=====Cargar Capa Workload===
+Ejecutar en terminal
+spark-submit \
+ --master yarn \
+ --deploy-mode cluster \
+ --conf spark.sql.warehouse.dir=/user/hadoop/warehouse \
+ --conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
+ /home/hadoop/spark-elt-medallon/procesos/poblar_capa_workload.py \
+ --env TopicosB \
+ --username hadoop \
+ --base_path /user \
+ --local_data_path /user/hadoop/dataset
+
+
+
+Proceso Carga_Workload YARN
+Evidencia DBEAVER Topicosb_workload
+
+
+=====Crear directorio HDFS Landing====
+hdfs dfs -mkdir -p /user/hadoop/datalake/schema/TOPICOSB_LANDING/
+hdfs dfs -put -f /home/hadoop/spark-elt-medallon/schema/*.avsc /user/hadoop/datalake/schema/TOPICOSB_LANDING/
+hdfs dfs -ls /user/hadoop/datalake/schema/TOPICOSB_LANDING/
+
+
+======Cargar Capa Landing===
+Ejecutar en la terminal:
+spark-submit \
+ --master yarn \
+ --deploy-mode cluster \
+ --conf spark.sql.warehouse.dir=/user/hadoop/warehouse \
+ --conf spark.sql.avro.compression.codec=snappy \
+ --packages org.apache.spark:spark-avro_2.12:3.5.0 \
+ /home/hadoop/spark-elt-medallon/procesos/poblar_capa_landing.py \
+ --env TopicosB \
+ --username hadoop \
+ --base_path /user \
+ --schema_path /user/hadoop/datalake/schema \
+ --source_db topicosb_workload
+
+
+ (verificarlo en el hadoop puerto 8088 y en DBEAVER)
+
+
+=========Cargar Capa Curated===========
+Ejecutar en la terminal:
+spark-submit \
+ --master yarn \
+ --deploy-mode cluster \
+ --conf spark.sql.warehouse.dir=/user/hadoop/warehouse \
+ --conf spark.sql.parquet.compression.codec=snappy \
+ --conf spark.dynamicAllocation.enabled=true \
+ --conf spark.executor.instances=10 \
+ --conf spark.executor.memory=4g \
+ --conf spark.driver.memory=2g \
+ /home/hadoop/spark-elt-medallon/procesos/poblar_capa_curated.py \
+ --env TopicosB \
+ --username hadoop \
+ --base_path /user \
+ --source_db landing \
+ --enable-validation
+
+  (verificarlo en el hadoop puerto 8088 y en DBEAVER)
+
+
+===========Cargar Capa Functional=======
+Ejecutar en la terminal:
+spark-submit \
+ --master yarn \
+ --deploy-mode cluster \
+ --conf spark.sql.warehouse.dir=/user/hadoop/warehouse \
+ --conf spark.yarn.queue=default \
+ --conf spark.sql.parquet.compression.codec=snappy \
+ --conf spark.dynamicAllocation.enabled=false \
+ /home/hadoop/spark-elt-medallon/procesos/poblar_capa_functional.py \
+ --env TopicosB \
+ --username hadoop \
+ --base_path /user \
+ --source_db curated \
+ --num-executors 8 \
+ --executor-memory 2g \
+ --executor-cores 2 \
+ --enable-broadcast
+
+ (verificarlo en el hadoop puerto 8088 y en DBEAVER)
+
+
+
+============Exportar Capa Gold a .csv=============
+Ejecutar en la terminal
+spark-submit \
+ --master yarn \
+ --deploy-mode client \
+ --conf spark.sql.warehouse.dir=/user/hadoop/warehouse \
+ /home/hadoop/spark-elt-medallon/procesos/export_gold_to_csv.py
+Se crea la carpeta datalake/temp
+Dentro se guarda archivo part-*.csv
+* Valor cambiante
+
+
+===========Opcional: Exportar archivo part-*.csv a gold.csv============
+Ejecutar en la terminal
+# Copiar
+cp /home/hadoop/spark-elt-medallon/datalake/temp/part-*.csv /home/hadoop/spark-elt-medallon/datalake/gold.csv
+# Verificar resultado
+wc -l /home/hadoop/spark-elt-medallon/datalake/gold.csv
+head -5 /home/hadoop/spark-elt-medallon/datalake/gold.csv
+
+====Configurar bindIP en MongoDB===
+Abrir archive mongod.cfg de la ruta C:\Program Files\MongoDB\Server\8.2\bin
+
+Colocar bindIP: 0.0.0.0
+
+
+=====Migrar part-*.csv o gold.csv a MongoDB====
+Ejecutar en la terminal
+spark-submit \
+ --master yarn \
+ --deploy-mode client \
+ --packages org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 \
+ /home/hadoop/spark-elt-medallon/procesos/export_gold_to_mongo.py
+
+
+
+
+
+
+
+
+
+
+
